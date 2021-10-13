@@ -11,13 +11,10 @@ use Magento\Framework\App\Action\HttpPostActionInterface as HttpPostActionInterf
 use Magento\Authorization\Model\Acl\Role\Group as RoleGroup;
 use Magento\Authorization\Model\UserContextInterface;
 use Magento\Framework\Controller\ResultFactory;
-use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\State\UserLockedException;
 use Magento\Security\Model\SecurityCookie;
 
 /**
- * Save role controller
- *
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  */
 class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements HttpPostActionInterface
@@ -62,8 +59,9 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
     {
         if (!($this->securityCookie instanceof SecurityCookie)) {
             return \Magento\Framework\App\ObjectManager::getInstance()->get(SecurityCookie::class);
+        } else {
+            return $this->securityCookie;
         }
-        return $this->securityCookie;
     }
 
     /**
@@ -78,8 +76,10 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
 
         $rid = $this->getRequest()->getParam('role_id', false);
         $resource = $this->getRequest()->getParam('resource', false);
-        $oldRoleUsers = $this->parseRequestVariable('in_role_user_old');
-        $roleUsers = $this->parseRequestVariable('in_role_user');
+        $roleUsers = $this->getRequest()->getParam('in_role_user', null);
+        parse_str($roleUsers, $roleUsers);
+        $roleUsers = array_keys($roleUsers);
+
         $isAll = $this->getRequest()->getParam('all');
         if ($isAll) {
             $resource = [$this->_objectManager->get(\Magento\Framework\Acl\RootResource::class)->getId()];
@@ -105,9 +105,13 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
             $role->save();
 
             $this->_rulesFactory->create()->setRoleId($role->getId())->setResources($resource)->saveRel();
-            $this->processPreviousUsers($role, $oldRoleUsers);
-            $this->processCurrentUsers($role, $roleUsers);
-            $this->messageManager->addSuccessMessage(__('You saved the role.'));
+
+            $this->processPreviousUsers($role);
+
+            foreach ($roleUsers as $nRuid) {
+                $this->_addUserToRole($nRuid, $role->getId());
+            }
+            $this->messageManager->addSuccess(__('You saved the role.'));
         } catch (UserLockedException $e) {
             $this->_auth->logout();
             $this->getSecurityCookie()->setLogoutReasonCookie(
@@ -115,14 +119,14 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
             );
             return $resultRedirect->setPath('*');
         } catch (\Magento\Framework\Exception\AuthenticationException $e) {
-            $this->messageManager->addErrorMessage(
+            $this->messageManager->addError(
                 __('The password entered for the current user is invalid. Verify the password and try again.')
             );
             return $this->saveDataToSessionAndRedirect($role, $this->getRequest()->getPostValue(), $resultRedirect);
         } catch (\Magento\Framework\Exception\LocalizedException $e) {
-            $this->messageManager->addErrorMessage($e->getMessage());
+            $this->messageManager->addError($e->getMessage());
         } catch (\Exception $e) {
-            $this->messageManager->addErrorMessage(__('An error occurred while saving this role.'));
+            $this->messageManager->addError(__('An error occurred while saving this role.'));
         }
 
         return $resultRedirect->setPath('*/*/');
@@ -147,51 +151,18 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
     }
 
     /**
-     * Parse request value from string
-     *
-     * @param string $paramName
-     * @return array
-     */
-    private function parseRequestVariable($paramName): array
-    {
-        $value = $this->getRequest()->getParam($paramName, null);
-        parse_str($value, $value);
-        $value = array_keys($value);
-        return $value;
-    }
-
-    /**
-     * Process previous users
-     *
      * @param \Magento\Authorization\Model\Role $role
-     * @param array $oldRoleUsers
      * @return $this
      * @throws \Exception
      */
-    protected function processPreviousUsers(\Magento\Authorization\Model\Role $role, array $oldRoleUsers): self
+    protected function processPreviousUsers(\Magento\Authorization\Model\Role $role)
     {
+        $oldRoleUsers = $this->getRequest()->getParam('in_role_user_old');
+        parse_str($oldRoleUsers, $oldRoleUsers);
+        $oldRoleUsers = array_keys($oldRoleUsers);
+
         foreach ($oldRoleUsers as $oUid) {
             $this->_deleteUserFromRole($oUid, $role->getId());
-        }
-
-        return $this;
-    }
-
-    /**
-     * Processes users to be assigned to roles
-     *
-     * @param \Magento\Authorization\Model\Role $role
-     * @param array $roleUsers
-     * @return $this
-     */
-    private function processCurrentUsers(\Magento\Authorization\Model\Role $role, array $roleUsers): self
-    {
-        foreach ($roleUsers as $nRuid) {
-            try {
-                $this->_addUserToRole($nRuid, $role->getId());
-            } catch (LocalizedException $e) {
-                $this->messageManager->addErrorMessage($e->getMessage());
-            }
         }
 
         return $this;
@@ -203,7 +174,6 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
      * @param int $userId
      * @param int $roleId
      * @return bool
-     * @throws LocalizedException
      */
     protected function _addUserToRole($userId, $roleId)
     {
@@ -237,8 +207,6 @@ class SaveRole extends \Magento\User\Controller\Adminhtml\User\Role implements H
     }
 
     /**
-     * Save data to session and redirect
-     *
      * @param \Magento\Authorization\Model\Role $role
      * @param array $data
      * @param \Magento\Backend\Model\View\Result\Redirect $resultRedirect
