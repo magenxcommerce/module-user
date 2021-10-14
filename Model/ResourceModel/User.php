@@ -272,7 +272,6 @@ class User extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
             return false;
         }
 
-        $user->beforeDelete();
         $this->_beforeDelete($user);
         $connection = $this->getConnection();
         $connection->beginTransaction();
@@ -284,11 +283,11 @@ class User extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
             );
         } catch (LocalizedException $e) {
             $connection->rollBack();
+
             return false;
         }
-        $user->afterDelete();
+
         $connection->commit();
-        $user->afterDeleteCommit();
         $this->_afterDelete($user);
 
         return true;
